@@ -1,0 +1,12 @@
+[package]
+name = "rydcon"
+version = "0.0.1"
+edition = "2021"
+description = "A CLI for Ryder devices."
+readme = "README.md"
+license = "MIT"
+
+[dependencies]
+clap = { version = "4.0.8", features = ["derive", "cargo"] }
+ctrlc = "3.2.3"
+serial = "0.4.0"
