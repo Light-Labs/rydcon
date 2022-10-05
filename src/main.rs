@@ -402,6 +402,10 @@ fn run(args: Args) -> Result<(), Box<dyn Error>> {
 
     // Open the serial port
     let mut port = serial::open(&args.port)?;
+    port.reconfigure(&|settings| {
+        settings.set_baud_rate(serial::Baud115200)?;
+        Ok(())
+    })?;
     port.set_timeout(Duration::from_millis(100))?;
 
     // Get the device info (if the device is valid)
