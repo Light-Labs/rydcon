@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 use std::{error, fmt, process, thread};
+use std::convert::TryFrom;
 
 use clap::{crate_version, Parser};
 use serial::{SerialPort, SystemPort};
@@ -97,7 +98,6 @@ impl PartialEq<Command> for u8 {
 /// A response code that can be received from a Ryder device.
 #[derive(Clone, Copy)]
 #[repr(u8)]
-#[allow(dead_code)]
 enum Response {
     // Success responses
     Ok = 1,
@@ -137,6 +137,68 @@ impl PartialEq<u8> for Response {
 impl PartialEq<Response> for u8 {
     fn eq(&self, other: &Response) -> bool {
         other == self
+    }
+}
+
+impl TryFrom<u8> for Response {
+    type Error = ();
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        let response = match value {
+            x if x == Response::Ok => Response::Ok,
+            x if x == Response::SendInput => Response::SendInput,
+            x if x == Response::Rejected => Response::Rejected,
+            x if x == Response::Output => Response::Output,
+            x if x == Response::OutputEnd => Response::OutputEnd,
+            x if x == Response::EscSequence => Response::EscSequence,
+            x if x == Response::WaitUserConfirm => Response::WaitUserConfirm,
+            x if x == Response::Locked => Response::Locked,
+            x if x == Response::ErrorUnknownCommand => Response::ErrorUnknownCommand,
+            x if x == Response::ErrorNotInitialised => Response::ErrorNotInitialised,
+            x if x == Response::ErrorMemoryError => Response::ErrorMemoryError,
+            x if x == Response::ErrorAppDomainTooLong => Response::ErrorAppDomainTooLong,
+            x if x == Response::ErrorAppDomainInvalid => Response::ErrorAppDomainInvalid,
+            x if x == Response::ErrorMnemonicTooLong => Response::ErrorMnemonicTooLong,
+            x if x == Response::ErrorMnemonicInvalid => Response::ErrorMnemonicInvalid,
+            x if x == Response::ErrorGenerateMnemonic => Response::ErrorGenerateMnemonic,
+            x if x == Response::ErrorInputTimeout => Response::ErrorInputTimeout,
+            x if x == Response::ErrorNotImplemented => Response::ErrorNotImplemented,
+            x if x == Response::ErrorInputTooLong => Response::ErrorInputTooLong,
+            x if x == Response::ErrorInputMalformed => Response::ErrorInputMalformed,
+            x if x == Response::ErrorDeprecated => Response::ErrorDeprecated,
+            _ => return Err(()),
+        };
+
+        Ok(response)
+    }
+}
+
+impl fmt::Display for Response {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+       let string = match self {
+            Response::Ok => "RESPONSE_OK",
+            Response::SendInput => "RESPONSE_SEND_INPUT",
+            Response::Rejected => "RESPONSE_REJECTED",
+            Response::Output => "RESPONSE_OUTPUT",
+            Response::OutputEnd => "RESPONSE_OUTPUT_END",
+            Response::EscSequence => "RESPONSE_ESC_SEQUENCE",
+            Response::WaitUserConfirm => "RESPONSE_WAIT_USER_CONFIRM",
+            Response::Locked => "RESPONSE_LOCKED",
+            Response::ErrorUnknownCommand => "RESPONSE_ERROR_UNKNOWN_COMMAND",
+            Response::ErrorNotInitialised => "RESPONSE_ERROR_NOT_INITIALISED",
+            Response::ErrorMemoryError => "RESPONSE_ERROR_MEMORY_ERROR",
+            Response::ErrorAppDomainTooLong => "RESPONSE_ERROR_APP_DOMAIN_TOO_LONG",
+            Response::ErrorAppDomainInvalid => "RESPONSE_ERROR_APP_DOMAIN_INVALID",
+            Response::ErrorMnemonicTooLong => "RESPONSE_ERROR_MNEMONIC_TOO_LONG",
+            Response::ErrorMnemonicInvalid => "RESPONSE_ERROR_MNEMONIC_INVALID",
+            Response::ErrorGenerateMnemonic => "RESPONSE_ERROR_GENERATE_MNEMONIC",
+            Response::ErrorInputTimeout => "RESPONSE_ERROR_INPUT_TIMEOUT",
+            Response::ErrorNotImplemented => "RESPONSE_ERROR_NOT_IMPLEMENTED",
+            Response::ErrorInputTooLong => "RESPONSE_ERROR_INPUT_TOO_LONG",
+            Response::ErrorInputMalformed => "RESPONSE_ERROR_INPUT_MALFORMED",
+            Response::ErrorDeprecated => "RESPONSE_ERROR_DEPRECATED",
+        };
+
+        write!(f, "{}", string)
     }
 }
 
@@ -354,7 +416,15 @@ fn format_output(output: &ParsedResponse) -> String {
 
 /// Formats and prints data received from the Ryder device.
 fn print_output(output: &ParsedResponse) {
-    println!("< {}", format_output(output));
+    let mut string = format!("< {}", format_output(output));
+
+    if let ParsedResponse::Single(byte) = output {
+        if let Ok(response) = Response::try_from(*byte) {
+            string.extend(format!(" ({})", response.to_string()).chars());
+        }
+    }
+
+    println!("{}", string);
 }
 
 /// Starts the work thread that handles receives inputs from the main thread, sends them to the
