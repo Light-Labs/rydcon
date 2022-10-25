@@ -488,6 +488,7 @@ fn run(args: Args) -> Result<(), Box<dyn Error>> {
         "Connected to Ryder device with firmware version {} at {}\n",
         device_info.firmware_version, args.port,
     );
+    println!("Type \"help\" for a list of available commands.");
 
     // Start background thread to handle inputs and device communication
     let (input_tx, input_rx) = mpsc::channel();
