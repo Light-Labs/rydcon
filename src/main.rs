@@ -48,7 +48,7 @@ enum Command {
     #[strum(serialize = "COMMAND_RESTORE_FROM_MNEMONIC")]
     RestoreFromMnemonic = 12,
 
-    #[strum(serialize = "COMMAND_Erase")]
+    #[strum(serialize = "COMMAND_ERASE")]
     Erase = 13,
 
     #[strum(serialize = "COMMAND_STACKS_APP_SIGN_IN_REQUEST_LEGACY")]
