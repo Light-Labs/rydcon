@@ -1,54 +1,21 @@
 use std::error::Error;
 use std::io::{self, BufRead, Read, Write};
 use std::str::FromStr;
+use std::string::ToString;
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 use std::{error, fmt, process, thread};
-use std::convert::TryFrom;
 
 use clap::{crate_version, Parser};
 use serial::{SerialPort, SystemPort};
+use strum::IntoEnumIterator;
+use strum_macros::{Display, EnumIter, EnumString, FromRepr};
 
 const VERSION: &'static str = crate_version!();
 
 /// The max length of a COMMAND_INFO response assuming each version character is escaped (12 + 3
 /// escape characters).
 const MAX_COMMAND_INFO_RESPONSE_BYTES: usize = 15;
-/// A map between command names and their corresponding `Command` variants.
-const COMMAND_NAME_MAP: [(&'static str, Command); 14] = [
-    ("COMMAND_WAKE", Command::Wake),
-    ("COMMAND_INFO", Command::Info),
-    ("COMMAND_UNLOCK", Command::Unlock),
-    ("COMMAND_SETUP", Command::Setup),
-    ("COMMAND_RESTORE_FROM_SEED", Command::RestoreFromSeed),
-    (
-        "COMMAND_RESTORE_FROM_MNEMONIC",
-        Command::RestoreFromMnemonic,
-    ),
-    ("COMMAND_ERASE", Command::Erase),
-    (
-        "COMMAND_STACKS_APP_SIGN_IN_REQUEST_LEGACY",
-        Command::StacksAppSignInRequestLegacy,
-    ),
-    (
-        "COMMAND_EXPORT_DERIVED_PUBLIC_KEY",
-        Command::ExportDerivedPublicKey,
-    ),
-    (
-        "COMMAND_REQUEST_TRANSACTION_SIGN",
-        Command::RequestTransactionSign,
-    ),
-    (
-        "COMMAND_REQUEST_STRUCTURED_MESSAGE_SIGN",
-        Command::RequestStructuredMessageSign,
-    ),
-    (
-        "COMMAND_REQUEST_IDENTITY_MESSAGE_SIGN",
-        Command::RequestIdentityMessageSign,
-    ),
-    ("COMMAND_CANCEL", Command::Cancel),
-    ("COMMAND_DEBUG", Command::Debug),
-];
 
 /// CLI arguments specification used by clap
 #[derive(Parser, Debug)]
@@ -60,26 +27,49 @@ struct Args {
 }
 
 /// A command that can be sent to a Ryder device.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Display, EnumString, EnumIter)]
 #[repr(u8)]
-#[allow(dead_code)]
 enum Command {
+    #[strum(serialize = "COMMAND_WAKE")]
     Wake = 1,
+
+    #[strum(serialize = "COMMAND_INFO")]
     Info = 2,
+
+    #[strum(serialize = "COMMAND_UNLOCK")]
     Unlock = 3,
+
+    #[strum(serialize = "COMMAND_SETUP")]
     Setup = 10,
+
+    #[strum(serialize = "COMMAND_RESTORE_FROM_SEED")]
     RestoreFromSeed = 11,
+
+    #[strum(serialize = "COMMAND_RESTORE_FROM_MNEMONIC")]
     RestoreFromMnemonic = 12,
+
+    #[strum(serialize = "COMMAND_ERASE")]
     Erase = 13,
 
+    #[strum(serialize = "COMMAND_STACKS_APP_SIGN_IN_REQUEST_LEGACY")]
     StacksAppSignInRequestLegacy = 20,
+
+    #[strum(serialize = "COMMAND_EXPORT_DERIVED_PUBLIC_KEY")]
     ExportDerivedPublicKey = 40,
 
+    #[strum(serialize = "COMMAND_REQUEST_TRANSACTION_SIGN")]
     RequestTransactionSign = 50,
+
+    #[strum(serialize = "COMMAND_REQUEST_STRUCTURED_MESSAGE_SIGN")]
     RequestStructuredMessageSign = 51,
+
+    #[strum(serialize = "COMMAND_REQUEST_IDENTITY_MESSAGE_SIGN")]
     RequestIdentityMessageSign = 60,
 
+    #[strum(serialize = "COMMAND_CANCEL")]
     Cancel = 100,
+
+    #[strum(serialize = "COMMAND_DEBUG")]
     Debug = 255,
 }
 
@@ -96,35 +86,75 @@ impl PartialEq<Command> for u8 {
 }
 
 /// A response code that can be received from a Ryder device.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Display, EnumString, FromRepr)]
 #[repr(u8)]
 enum Response {
     // Success responses
+    #[strum(serialize = "RESPONSE_OK")]
     Ok = 1,
+
+    #[strum(serialize = "RESPONSE_SEND_INPUT")]
     SendInput = 2,
+
+    #[strum(serialize = "RESPONSE_REJECTED")]
     Rejected = 3,
+
     /// Arbitrary data follows, terminated by `OutputEnd`.
+    #[strum(serialize = "RESPONSE_OUTPUT")]
     Output = 4,
+
     /// Signals the end of data began by `Output`.
+    #[strum(serialize = "RESPONSE_OUTPUT_END")]
     OutputEnd = 5,
+
     /// Removes any special meaning from the following byte.
+    #[strum(serialize = "RESPONSE_ESC_SEQUENCE")]
     EscSequence = 6,
+
+    #[strum(serialize = "RESPONSE_WAIT_USER_CONFIRM")]
     WaitUserConfirm = 10,
+
+    #[strum(serialize = "RESPONSE_LOCKED")]
     Locked = 11,
 
     // Error responses
+    #[strum(serialize = "RESPONSE_ERROR_UNKNOWN_COMMAND")]
     ErrorUnknownCommand = 255,
+
+    #[strum(serialize = "RESPONSE_ERROR_NOT_INITIALISED")]
     ErrorNotInitialised = 254,
+
+    #[strum(serialize = "RESPONSE_ERROR_MEMORY_ERROR")]
     ErrorMemoryError = 253,
+
+    #[strum(serialize = "RESPONSE_ERROR_APP_DOMAIN_TOO_LONG")]
     ErrorAppDomainTooLong = 252,
+
+    #[strum(serialize = "RESPONSE_ERROR_APP_DOMAIN_INVALID")]
     ErrorAppDomainInvalid = 251,
+
+    #[strum(serialize = "RESPONSE_ERROR_MNEMONIC_TOO_LONG")]
     ErrorMnemonicTooLong = 250,
+
+    #[strum(serialize = "RESPONSE_ERROR_MNEMONIC_INVALID")]
     ErrorMnemonicInvalid = 249,
+
+    #[strum(serialize = "RESPONSE_ERROR_GENERATE_MNEMONIC")]
     ErrorGenerateMnemonic = 248,
+
+    #[strum(serialize = "RESPONSE_ERROR_INPUT_TIMEOUT")]
     ErrorInputTimeout = 247,
+
+    #[strum(serialize = "RESPONSE_ERROR_NOT_IMPLEMENTED")]
     ErrorNotImplemented = 246,
+
+    #[strum(serialize = "RESPONSE_ERROR_INPUT_TOO_LONG")]
     ErrorInputTooLong = 245,
+
+    #[strum(serialize = "RESPONSE_ERROR_INPUT_MALFORMED")]
     ErrorInputMalformed = 244,
+
+    #[strum(serialize = "RESPONSE_ERROR_DEPRECATED")]
     ErrorDeprecated = 243,
 }
 
@@ -137,68 +167,6 @@ impl PartialEq<u8> for Response {
 impl PartialEq<Response> for u8 {
     fn eq(&self, other: &Response) -> bool {
         other == self
-    }
-}
-
-impl TryFrom<u8> for Response {
-    type Error = ();
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        let response = match value {
-            x if x == Response::Ok => Response::Ok,
-            x if x == Response::SendInput => Response::SendInput,
-            x if x == Response::Rejected => Response::Rejected,
-            x if x == Response::Output => Response::Output,
-            x if x == Response::OutputEnd => Response::OutputEnd,
-            x if x == Response::EscSequence => Response::EscSequence,
-            x if x == Response::WaitUserConfirm => Response::WaitUserConfirm,
-            x if x == Response::Locked => Response::Locked,
-            x if x == Response::ErrorUnknownCommand => Response::ErrorUnknownCommand,
-            x if x == Response::ErrorNotInitialised => Response::ErrorNotInitialised,
-            x if x == Response::ErrorMemoryError => Response::ErrorMemoryError,
-            x if x == Response::ErrorAppDomainTooLong => Response::ErrorAppDomainTooLong,
-            x if x == Response::ErrorAppDomainInvalid => Response::ErrorAppDomainInvalid,
-            x if x == Response::ErrorMnemonicTooLong => Response::ErrorMnemonicTooLong,
-            x if x == Response::ErrorMnemonicInvalid => Response::ErrorMnemonicInvalid,
-            x if x == Response::ErrorGenerateMnemonic => Response::ErrorGenerateMnemonic,
-            x if x == Response::ErrorInputTimeout => Response::ErrorInputTimeout,
-            x if x == Response::ErrorNotImplemented => Response::ErrorNotImplemented,
-            x if x == Response::ErrorInputTooLong => Response::ErrorInputTooLong,
-            x if x == Response::ErrorInputMalformed => Response::ErrorInputMalformed,
-            x if x == Response::ErrorDeprecated => Response::ErrorDeprecated,
-            _ => return Err(()),
-        };
-
-        Ok(response)
-    }
-}
-
-impl fmt::Display for Response {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-       let string = match self {
-            Response::Ok => "RESPONSE_OK",
-            Response::SendInput => "RESPONSE_SEND_INPUT",
-            Response::Rejected => "RESPONSE_REJECTED",
-            Response::Output => "RESPONSE_OUTPUT",
-            Response::OutputEnd => "RESPONSE_OUTPUT_END",
-            Response::EscSequence => "RESPONSE_ESC_SEQUENCE",
-            Response::WaitUserConfirm => "RESPONSE_WAIT_USER_CONFIRM",
-            Response::Locked => "RESPONSE_LOCKED",
-            Response::ErrorUnknownCommand => "RESPONSE_ERROR_UNKNOWN_COMMAND",
-            Response::ErrorNotInitialised => "RESPONSE_ERROR_NOT_INITIALISED",
-            Response::ErrorMemoryError => "RESPONSE_ERROR_MEMORY_ERROR",
-            Response::ErrorAppDomainTooLong => "RESPONSE_ERROR_APP_DOMAIN_TOO_LONG",
-            Response::ErrorAppDomainInvalid => "RESPONSE_ERROR_APP_DOMAIN_INVALID",
-            Response::ErrorMnemonicTooLong => "RESPONSE_ERROR_MNEMONIC_TOO_LONG",
-            Response::ErrorMnemonicInvalid => "RESPONSE_ERROR_MNEMONIC_INVALID",
-            Response::ErrorGenerateMnemonic => "RESPONSE_ERROR_GENERATE_MNEMONIC",
-            Response::ErrorInputTimeout => "RESPONSE_ERROR_INPUT_TIMEOUT",
-            Response::ErrorNotImplemented => "RESPONSE_ERROR_NOT_IMPLEMENTED",
-            Response::ErrorInputTooLong => "RESPONSE_ERROR_INPUT_TOO_LONG",
-            Response::ErrorInputMalformed => "RESPONSE_ERROR_INPUT_MALFORMED",
-            Response::ErrorDeprecated => "RESPONSE_ERROR_DEPRECATED",
-        };
-
-        write!(f, "{}", string)
     }
 }
 
@@ -220,11 +188,12 @@ impl FromStr for Input {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut s = s.to_string();
         // Replace command names with their byte values
-        for (command_name, value) in COMMAND_NAME_MAP {
+        for command in Command::iter() {
+            let command_name = command.to_string();
             // Don't waste time checking commands that are longer than the input
             if s.len() >= command_name.len() {
-                let value_str = format!("{:02x}", value as u8);
-                s = s.replace(command_name, &value_str);
+                let value_str = format!("{:02x}", command as u8);
+                s = s.replace(&command_name, &value_str);
             }
         }
 
@@ -419,7 +388,7 @@ fn print_output(output: &ParsedResponse) {
     let mut string = format!("< {}", format_output(output));
 
     if let ParsedResponse::Single(byte) = output {
-        if let Ok(response) = Response::try_from(*byte) {
+        if let Some(response) = Response::from_repr(*byte) {
             string.extend(format!(" ({})", response.to_string()).chars());
         }
     }
@@ -508,8 +477,8 @@ fn run(args: Args) -> Result<(), Box<dyn Error>> {
 
         // Provide a basic help command
         if input.trim() == "help" {
-            for (command_name, value) in COMMAND_NAME_MAP {
-                println!("{} = {:02x}", command_name, value as u8);
+            for command in Command::iter() {
+                println!("{} = {:02x}", command, command as u8);
             }
             continue;
         }
