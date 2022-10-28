@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, BufRead, Read, StdoutLock, Write};
 use std::str::FromStr;
 use std::string::ToString;
 use std::sync::mpsc::{self, Receiver};
@@ -384,7 +384,7 @@ fn format_output(output: &ParsedResponse) -> String {
 }
 
 /// Formats and prints data received from the Ryder device.
-fn print_output(output: &ParsedResponse) {
+fn print_output(output: &ParsedResponse, stdout: &mut StdoutLock) {
     let mut string = format!("< {}", format_output(output));
 
     if let ParsedResponse::Single(byte) = output {
@@ -393,12 +393,23 @@ fn print_output(output: &ParsedResponse) {
         }
     }
 
-    println!("{}", string);
+    writeln!(stdout, "{}", string).expect("Failed to print to stdout");
 }
 
 /// Starts the work thread that handles receives inputs from the main thread, sends them to the
 /// Ryder device for processing asynchronously, and displays any responses received.
-fn start_work_thread(mut port: SystemPort, input_rx: Receiver<Input>, ctrlc_rx: Receiver<()>) {
+///
+/// `prompt_rx` is used to determine whether the prompt was printed before the output, indicating
+/// that the prompt must be reprinted.
+fn start_work_thread(
+    mut port: SystemPort,
+    input_rx: Receiver<Input>,
+    ctrlc_rx: Receiver<()>,
+    prompt_rx: Receiver<()>,
+) {
+    // Whether received data can be printed safely without it ending up on the input line
+    let mut can_output_safely = false;
+
     thread::spawn(move || {
         loop {
             // Check for ctrl-c inputs
@@ -408,15 +419,44 @@ fn start_work_thread(mut port: SystemPort, input_rx: Receiver<Input>, ctrlc_rx: 
                 process::exit(1);
             }
 
+            // If the next prompt was printed, it is no longer safe to just print output
+            if prompt_rx.try_recv().is_ok() {
+                can_output_safely = false;
+            }
+
             // Read any responses
-            match read_response_to_end(&mut port, None) {
-                Ok(r) => r.into_iter().for_each(|x| print_output(&x)),
-                // Discard errors (timeouts are common)
-                Err(_) => {}
+            let mut responses = read_response_to_end(&mut port, None);
+            if responses.is_ok() {
+                let mut stdout = io::stdout().lock();
+                // If the next prompt was printed before this output was received, print a
+                // newline to avoid the output being printed on the prompt line
+                if !can_output_safely {
+                    write!(stdout, "\n").expect("Failed to print to stdout");
+                }
+
+                // Keep reading and printing responses until a timeout occurs
+                while let Ok(rs) = responses {
+                    for r in rs {
+                        print_output(&r, &mut stdout);
+                    }
+
+                    responses = read_response_to_end(&mut port, None);
+                }
+
+                if !can_output_safely {
+                    write!(stdout, "> ").expect("Failed to print to stdout");
+                }
+
+                // Ensure the previous writes are displayed immediately
+                stdout.flush().expect("Failed to print to stdout");
             }
 
             // Check for user inputs and handle them
             if let Ok(input) = input_rx.try_recv() {
+                // If the user pressed enter, we are on a new line and can print output safely
+                // without causing issues with the prompt
+                can_output_safely = true;
+
                 // Send the input
                 if let Err(e) = port.write(&input.0) {
                     // Close the serial port and crash if an error occurred
@@ -461,7 +501,8 @@ fn run(args: Args) -> Result<(), Box<dyn Error>> {
 
     // Start background thread to handle inputs and device communication
     let (input_tx, input_rx) = mpsc::channel();
-    start_work_thread(port, input_rx, ctrlc_rx);
+    let (prompt_tx, prompt_rx) = mpsc::channel();
+    start_work_thread(port, input_rx, ctrlc_rx, prompt_rx);
 
     let mut stdin = io::stdin().lock();
     let mut input = String::new();
@@ -470,6 +511,7 @@ fn run(args: Args) -> Result<(), Box<dyn Error>> {
     loop {
         // Read user input
         print!("> ");
+        prompt_tx.send(())?;
         io::stdout().flush()?;
 
         input.clear();
@@ -493,8 +535,10 @@ fn run(args: Args) -> Result<(), Box<dyn Error>> {
         };
         input_tx.send(input)?;
 
-        // Wait before showing the next prompt to give a little time for output to be shown properly
-        // (sometimes the output is shown over the prompt anyways, but this covers the common cases)
+        // Wait before showing the next prompt to give a little time for output to be shown cleanly
+        // If the output arrives too late anyways, a new prompt line will be printed, which can
+        // cause minor issues with the appearance of input entered already (but no issues with
+        // functionality)
         thread::sleep(Duration::from_millis(250));
     }
 }
